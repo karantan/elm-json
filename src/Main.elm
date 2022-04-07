@@ -1,17 +1,20 @@
 module Main exposing (main)
 
 import Bootstrap.CDN as CDN
+import Bootstrap.Card as Card
+import Bootstrap.Card.Block as Block
 import Bootstrap.Grid as Grid
 import Bootstrap.Grid.Col as Col
 import Bootstrap.Grid.Row as Row
 import Browser
 import Browser.Dom
 import Html exposing (..)
-import Html.Attributes exposing (cols, id, placeholder, rows)
+import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Json.Decode as Decode exposing (Decoder, decodeString, errorToString, int, list, nullable, string)
-import Json.Decode.Pipeline exposing (hardcoded, optional, required)
+import Json.Decode.Pipeline as Pipeline exposing (hardcoded, optional, required)
+import Json.Encode as Encode
 import Task
 
 
@@ -66,10 +69,7 @@ init _ =
       , user = initUser
       , users = [ initUser ]
       }
-    , [ Browser.Dom.focus "myarea" |> Task.attempt (\_ -> NoOp)
-      , getUser
-      ]
-        |> Cmd.batch
+    , getUser
     )
 
 
@@ -93,11 +93,21 @@ decodeUsers =
 decodeUser : Decoder User
 decodeUser =
     Decode.succeed User
-        |> required "id" int
+        |> Pipeline.required "id" int
         -- `null` decodes to `Nothing`
-        |> required "email" (nullable string)
-        |> optional "name" string "name attribute is `null` or not present"
-        |> hardcoded 1.0
+        |> Pipeline.required "email" (nullable string)
+        |> Pipeline.optional "name" string "name attribute is `null` or not present"
+        |> Pipeline.hardcoded 1.0
+
+
+encodeUser : User -> Encode.Value
+encodeUser user =
+    Encode.object
+        [ ( "id", Encode.int <| user.id )
+        , ( "email", Encode.string <| Maybe.withDefault "/" user.email )
+        , ( "name", Encode.string <| user.name )
+        , ( "percentExcited", Encode.float <| user.percentExcited )
+        ]
 
 
 userExample : String
@@ -127,7 +137,14 @@ update msg model =
         GotUser result ->
             case result of
                 Ok user ->
-                    ( { model | user = user }, Cmd.none )
+                    let
+                        text : String
+                        text =
+                            user
+                                |> encodeUser
+                                |> Encode.encode 0
+                    in
+                    ( { model | user = user, text = text }, Cmd.none )
 
                 Err err ->
                     ( { model | error = httpErrorToString err }, Cmd.none )
@@ -209,16 +226,29 @@ view model =
         [ CDN.stylesheet -- creates an inline style node with the Bootstrap CSS
         , Grid.row [ Row.centerXs ]
             [ Grid.col [ Col.md12 ]
-                [ div []
-                    [ textarea [ rows 10, cols 75, onInput TextAreaUpdate, placeholder userExample, id "myarea" ] [ text userExample ]
-                    , div [] [ text ("Trying to decode `" ++ model.text ++ "`") ]
-                    , button [ onClick DecodeTextarea ] [ text "Decode" ]
-                    ]
+                [ Card.config []
+                    |> Card.block []
+                        [ Block.titleH4 [] [ text "User JSON Data" ]
+                        , Block.text [] [ textarea [ rows 5, cols 75, onInput TextAreaUpdate, placeholder userExample, value model.text ] [] ]
+                        , Block.text [] [ text ("Trying to decode `" ++ model.text ++ "`") ]
+                        , Block.link [ class "btn btn-primary", onClick DecodeTextarea ] [ text "Decode Input" ]
+                        , Block.link [ class "btn btn-primary", onClick GetUser ] [ text "Get Single User" ]
+                        , Block.link [ class "btn btn-primary", onClick GetUsers ] [ text "Get Users" ]
+                        ]
+                    |> Card.view
+                , Card.config []
+                    |> Card.block []
+                        [ Block.titleH4 [] [ text "Decoded User" ]
+                        , Block.text [] [ viewUser model.user ]
+                        ]
+                    |> Card.view
+                , Card.config []
+                    |> Card.block []
+                        [ Block.titleH4 [] [ text "Decoded User List" ]
+                        , Block.text [] (List.map viewUser model.users)
+                        ]
+                    |> Card.view
                 ]
-            , Grid.col [ Col.md12 ] [ button [ onClick GetUser ] [ text "Get Single User" ] ]
-            , Grid.col [ Col.md12 ] [ button [ onClick GetUsers ] [ text "Get Users" ] ]
-            , Grid.col [ Col.md12 ] [ viewUser model.user ]
-            , Grid.col [ Col.md12 ] [ div [] (List.map viewUser model.users) ]
             , Grid.col [ Col.md12 ] [ viewError model.error ]
             ]
         ]
@@ -230,6 +260,7 @@ viewUser user =
         [ Html.pre [] [ Html.text ("User ID: " ++ String.fromInt user.id) ]
         , Html.pre [] [ Html.text ("User Name: " ++ user.name) ]
         , Html.pre [] [ Html.text ("User Email: " ++ Maybe.withDefault "/" user.email) ]
+        , Html.pre [] [ Html.text ("Excited: " ++ String.fromFloat user.percentExcited) ]
         ]
 
 
